@@ -63,6 +63,12 @@ var mesh_manager:MeshManager
 
 var node_tree:NodeTree
 
+## Host overrides, so a filesystem plugin can supply richer behaviour without this package depending on it.
+## Unset = native EditorInterface behaviour.
+var activate_path_callable:Callable # (path)
+var navigate_path_callable:Callable # (path, calling_node)
+var tooltip_callable:Callable # (path) -> Control or null
+
 #^ settings
 var _global_settings = {}
 
@@ -188,16 +194,34 @@ func _list_loaded_scenes():
 
 func _on_node_tree_right_clicked(path:String):
 	var options = Options.new()
-	var fs_singleton = FileSystemSingleton.get_instance()
-	var file_type = fs_singleton.get_file_type(path)
+	var file_type = EditorInterface.get_resource_filesystem().get_file_type(path)
 	if ClassDB.is_parent_class("Resource", file_type):
-		options.add_option("Edit", FileSystemSingleton.get_instance().activate_path.bind(path), ["Edit"])
+		options.add_option("Edit", _activate_path.bind(path), ["Edit"])
 	else:
-		options.add_option("Open", FileSystemSingleton.get_instance().activate_path.bind(path), ["Load"])
-	
-	options.add_option("Show in FileSystem", FileSystemSingleton.get_instance().navigate_to_path.bind(path, self), ["Filesystem"])
-	
+		options.add_option("Open", _activate_path.bind(path), ["Load"])
+
+	options.add_option("Show in FileSystem", _navigate_to_path.bind(path), ["Filesystem"])
+
 	right_click_handler.display_popup(options)
+
+func _activate_path(path:String):
+	if activate_path_callable.is_valid():
+		activate_path_callable.call(path)
+	elif path.get_extension() in ["tscn", "scn"]:
+		EditorInterface.open_scene_from_path(path)
+	else:
+		EditorInterface.edit_resource(load(path))
+
+func _navigate_to_path(path:String):
+	if navigate_path_callable.is_valid():
+		navigate_path_callable.call(path, self)
+	else:
+		EditorInterface.get_file_system_dock().navigate_to_path(path)
+
+func _get_path_tooltip(path:String):
+	if tooltip_callable.is_valid():
+		return tooltip_callable.call(path)
+	return null
 
 
 func _on_global_settings_changed():
@@ -222,9 +246,10 @@ func set_light_settings(setting:Vector2):
 
 func _on_sub_viewport_can_drop_data(_at_position: Vector2, data: Variant) -> bool:
 	if data.get("type") == "files":
+		var res_fs = EditorInterface.get_resource_filesystem()
 		var files = data.get("files")
 		for f in files:
-			if FileSystemSingleton.get_file_type_static(f) == "PackedScene":
+			if res_fs.get_file_type(f) == "PackedScene":
 				return true
 	return false
 
@@ -580,7 +605,8 @@ func _build_nodes():
 	node_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	node_tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	node_tree.size_flags_stretch_ratio = 0.3
-	
+	node_tree.tooltip_callable = _get_path_tooltip
+
 	
 	
 	
@@ -590,6 +616,7 @@ func _build_nodes():
 	mesh_manager.active_scene_set.connect(_on_active_scene_set)
 	
 	node_tree.item_right_clicked.connect(_on_node_tree_right_clicked)
+	node_tree.path_activated.connect(_activate_path)
 	
 	next_mesh_button.pressed.connect(mesh_manager.show_next_mesh)
 	prev_mesh_button.pressed.connect(mesh_manager.show_prev_mesh)

@@ -9,12 +9,17 @@ var tree_items = {}
 var current_scene_path:String = ""
 var current_scene_instance:Node
 
+## Rich tooltip for file paths, set by SceneViewer; null falls back to the plain-text one.
+var tooltip_callable:Callable
+
 signal item_right_clicked(path:String)
+signal path_activated(path:String)
 
 func _ready() -> void:
-	FileSystemSingleton.get_instance().filesystem_changed.connect(_on_scan_files_complete)
+	EditorInterface.get_resource_filesystem().filesystem_changed.connect(_on_scan_files_complete)
 	clear_tree()
 	allow_rmb_select = true
+	item_activated.connect(_on_item_activated)
 	item_mouse_selected.connect(_on_item_mouse_selected)
 	button_clicked.connect(_on_button_clicked)
 
@@ -31,13 +36,21 @@ func _on_button_clicked(item:TreeItem, _col:int, id:int, mouse_button_index:int)
 	if mouse_button_index == 1:
 		if id == 0:
 			var path = meta.get("path", "")
-			FileSystemSingleton.activate_path(path)
+			path_activated.emit(path)
 		elif id == 5:
 			var object = meta.get("object")
 			if is_instance_valid(object) and object is Node3D:
 				object.visible = not object.visible
 				refresh()
-	
+
+func _on_item_activated():
+	var selected = get_selected()
+	var meta = selected.get_metadata(0)
+	if meta:
+		var path = meta.get("path", "")
+		if FileAccess.file_exists(path):
+			path_activated.emit(path)
+
 
 func clear_tree(msg:="No scene loaded", clear_current_scene:=false):
 	clear()
@@ -152,8 +165,8 @@ func _make_custom_tooltip(for_text:String):
 	var meta = item.get_metadata(0)
 	var path = meta.get("path")
 	if FileAccess.file_exists(path):
-		return FileSystemSingleton.get_custom_tooltip(path)
-	
+		return tooltip_callable.call(path) if tooltip_callable.is_valid() else null
+
 	var object = meta.get("object") as Object
 	var _class = object.get_class()
 	
