@@ -603,16 +603,12 @@ func _build_nodes():
 	node_tree = NodeTree.new()
 	node_tree.owned_only = true
 	node_tree.show_resources = true
-	node_tree.show_scripts = false
+	node_tree.show_scripts = true
 	main_split_container.add_child(node_tree)
 	node_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	node_tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	node_tree.size_flags_stretch_ratio = 0.3
 	node_tree.tooltip_callable = _get_path_tooltip
-
-	
-	
-	
 	
 	camera_panel.settings_changed.connect(_on_camera_settings_changed)
 	

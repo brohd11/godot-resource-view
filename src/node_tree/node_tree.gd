@@ -189,15 +189,15 @@ func _read_node(node: Node, parent: TreeItem, collapsed: Dictionary, selected_ob
 	if show_scripts:
 		var script = node.get_script() as Script
 		if script != null and not script.resource_path.is_empty():
-			_add_button(item, &"Script", SCRIPT_BUTTON, "Open attached script")
+			_add_button(item, &"Script", SCRIPT_BUTTON, "Open attached script:\n%s" % script.resource_path)
 	if node is Node3D or node is CanvasItem:
 		_add_button(item, &"GuiVisibilityVisible" if node.visible else &"GuiVisibilityHidden", VISIBILITY_BUTTON, "Toggle visibility")
 	if show_resources and node is MeshInstance3D and node.mesh != null:
 		var mesh_item = _add_resource(item, node.mesh, collapsed, selected_object)
 		for surface in node.mesh.get_surface_count():
-			var material = node.mesh.surface_get_material(surface)
-			if material != null:
-				_add_resource(mesh_item, material, collapsed, selected_object)
+			var _material = node.mesh.surface_get_material(surface)
+			if _material != null:
+				_add_resource(mesh_item, _material, collapsed, selected_object)
 	for child in node.get_children():
 		_read_node(child, item, collapsed, selected_object)
 
@@ -220,9 +220,9 @@ func _set_item(item: TreeItem, object: Object, label: String, path: String) -> v
 		return
 	var editor_theme = EditorInterface.get_editor_theme()
 	var icon_name = object.get_class()
-	item.set_icon(0, editor_theme.get_icon(icon_name if editor_theme.has_icon(icon_name, &"EditorIcons") else &"Node", &"EditorIcons"))
+	item.set_icon(0, editor_theme.get_icon(icon_name if editor_theme.has_icon(icon_name, &"EditorIcons") else "Node", &"EditorIcons"))
 	if not path.is_empty() and ResourceLoader.exists(path):
-		_add_button(item, &"Load", PATH_BUTTON, "Open resource")
+		_add_button(item, &"Load", PATH_BUTTON, "Open resource:\n%s" % path)
 
 
 func _add_button(item: TreeItem, icon_name: StringName, id: int, tooltip: String) -> void:
@@ -281,6 +281,12 @@ func _on_button_clicked(item: TreeItem, _column: int, id: int, mouse_button_inde
 
 func _make_custom_tooltip(_for_text: String) -> Object:
 	var item = get_item_at_position(get_local_mouse_position())
+	if not is_instance_valid(item):
+		return null
+	var b_id = get_button_id_at_position(get_local_mouse_position())
+	var button = item.get_button_by_id(0, b_id)
+	if button > -1:
+		return null
 	var object = _item_object(item)
 	if object == null:
 		return null
