@@ -10,7 +10,7 @@ const SettingHelperJson = preload("uid://dku4srj2t8htd") #! resolve SettingHelpe
 const Options = preload("uid://dxdxq2n3imf4q") #! resolve UtilR.Nodes.PopupMenus.Options
 
 const MeshManager = preload("res://addons/_lib/resource_view/src/scene_viewer/components/mesh_manager.gd")
-const NodeTree = preload("res://addons/_lib/resource_view/src/scene_viewer/components/node_tree.gd")
+const NodeTree = preload("uid://dsbpnuf6nc8l8") #! resolve ResourceView.NodeTree
 const ControllerFreeView = preload("uid://chvmdxo2kpwt3") #! resolve CamControl.Mouse.FreeView
 
 
@@ -135,7 +135,7 @@ func clear_scenes():
 func _on_active_scene_set(_scene_path:String, data:Dictionary):
 	var active_scene = mesh_manager.get_active_scene_instance()
 	stats_panel.set_text(data)
-	node_tree.send_scene_instance(active_scene)
+	node_tree.set_root_node(active_scene)
 	model_rotate_slider.visible = not data.is_empty()
 	model_rotate_slider.slider.value = rad_to_deg(active_scene.rotation.y) #^ reset slider
 	#active_scene.rotation.y = deg_to_rad(model_rotate_slider.slider.value) #^ set model to slider
@@ -601,6 +601,9 @@ func _build_nodes():
 	root_3d.add_child(mesh_manager)
 	
 	node_tree = NodeTree.new()
+	node_tree.owned_only = true
+	node_tree.show_resources = true
+	node_tree.show_scripts = false
 	main_split_container.add_child(node_tree)
 	node_tree.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	node_tree.size_flags_horizontal = Control.SIZE_EXPAND_FILL

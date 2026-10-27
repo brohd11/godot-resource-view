@@ -1,0 +1,15 @@
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="StandardMaterial3D" id="Material"]
+resource_name = "Test material"
+
+[sub_resource type="BoxMesh" id="Mesh"]
+resource_name = "Test mesh"
+material = SubResource("Material")
+
+[node name="Root" type="Node3D"]
+
+[node name="Mesh" type="MeshInstance3D" parent="."]
+mesh = SubResource("Mesh")
+
+[node name="EmptyMesh" type="MeshInstance3D" parent="."]
