@@ -13,6 +13,7 @@ static func run_tests() -> Dictionary:
 	await _test_subtree()
 	await _test_scene_mode()
 	await _test_lifecycle()
+	await _test_tree_state()
 	await _test_scroll()
 	var output: Array = ["ResourceView node tree: %d checks, %d failures" % [_checks, _failures.size()]]
 	output.append_array(_failures)
@@ -95,6 +96,14 @@ static func _test_scene_mode() -> void:
 	_check("scene-path nodes remain alive", is_instance_valid(root) and viewer.tree_items.size() == 3)
 	var mesh_item = viewer.tree_items[root.get_node("Mesh")].get_first_child()
 	_check("mesh and material resource rows remain available", mesh_item.get_text(0) == "Test mesh" and mesh_item.get_first_child().get_text(0) == "Test material")
+	var mesh_meta: Dictionary = mesh_item.get_metadata(0)
+	_check("embedded resource rows carry their scene, not a file path", mesh_meta.path.is_empty() and mesh_meta.embedded_in == SCENE)
+	_check("embedded resource tooltip names its scene", mesh_item.get_tooltip_text(0).contains("Embedded in: " + SCENE))
+	var activated: Array = []
+	viewer.path_activated.connect(func(path: String): activated.append(path))
+	mesh_item.select(0)
+	viewer._on_item_activated()
+	_check("activating an embedded resource emits no file path", activated.is_empty())
 	mesh_item.collapsed = true
 	viewer.refresh()
 	_check("resource branch collapse survives refresh", viewer.tree_items[root.get_node("Mesh")].get_first_child().collapsed)
@@ -141,6 +150,47 @@ static func _test_lifecycle() -> void:
 	viewer.free()
 	_check("destroying viewer disconnects caller nodes", is_instance_valid(root) and not root.child_order_changed.has_connections())
 	root.free()
+	await _settle()
+
+
+static func _test_tree_state() -> void:
+	var scene_tree = Engine.get_main_loop() as SceneTree
+	var viewer = NodeTree.new()
+	scene_tree.root.add_child(viewer)
+	var first = Node.new()
+	var branch = Node.new()
+	var leaf = Node.new()
+	first.add_child(branch)
+	branch.add_child(leaf)
+	var second = Node.new()
+	var selections: Array = []
+	viewer.object_selected.connect(func(object: Object): selections.append(object))
+	viewer.set_root_node(first)
+	viewer.tree_items[branch].collapsed = true
+	viewer.set_selected(viewer.tree_items[leaf], 0)
+	var state = viewer.get_tree_state()
+	viewer.set_root_node(second)
+	selections.clear()
+	viewer.set_root_node(first, state)
+	_check("state restores collapse and selection", viewer.tree_items[branch].collapsed and viewer.get_selected() == viewer.tree_items[leaf])
+	_check("restoring a selection emits no selection event", not selections.has(leaf))
+	viewer.set_root_node(second)
+	viewer.hide()
+	viewer.set_root_node(first, state)
+	_check("hidden tree hands back its pending state", viewer.get_tree_state() == state)
+	viewer.show()
+	viewer.refresh()
+	_check("pending state applies once visible", viewer.tree_items[branch].collapsed and viewer.get_selected() == viewer.tree_items[leaf])
+	viewer.tree_items[first].collapsed = true
+	viewer.tree_items[branch].collapsed = true
+	viewer.deselect_all()
+	selections.clear()
+	_check("select_object reveals a collapsed row", viewer.select_object(leaf) and not viewer.tree_items[first].collapsed and not viewer.tree_items[branch].collapsed)
+	_check("select_object selects and reports the object", viewer.get_selected() == viewer.tree_items[leaf] and selections == [leaf])
+	_check("select_object rejects objects outside the tree", not viewer.select_object(second))
+	viewer.free()
+	first.free()
+	second.free()
 	await _settle()
 
 

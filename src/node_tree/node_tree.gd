@@ -8,6 +8,7 @@ signal path_activated(path: String)
 
 const PATH_BUTTON = 0
 const SCRIPT_BUTTON = 1
+const EDIT_BUTTON = 2
 const VISIBILITY_BUTTON = 5
 
 var owned_only := false
@@ -24,6 +25,9 @@ var _watched: Array[Node] = []
 var _refresh_queued := false
 var _rebuilding := false
 var _empty_message := "No node loaded"
+# Applied by the next refresh, which waits until the tree is visible.
+var _pending_state: Dictionary = {}
+var _state_pending := false
 
 
 func _init() -> void:
@@ -55,11 +59,14 @@ func _notification(what: int) -> void:
 
 
 ## The caller owns this root. No scene ownership is required for its descendants.
-func set_root_node(root: Node) -> void:
+## [param state] comes from [method get_tree_state], restoring collapse and selection for this root.
+func set_root_node(root: Node, state: Dictionary = {}) -> void:
 	if is_instance_valid(root) and root == current_scene_instance:
 		refresh()
 		return
 	clear_root()
+	_pending_state = state
+	_state_pending = not state.is_empty()
 	if is_instance_valid(root):
 		current_scene_instance = root
 		current_scene_path = root.scene_file_path
@@ -68,6 +75,8 @@ func set_root_node(root: Node) -> void:
 
 func clear_root(message := "No node loaded") -> void:
 	_disconnect_watched()
+	_state_pending = false
+	_pending_state = {}
 	current_scene_instance = null
 	current_scene_path = ""
 	clear_tree(message)
@@ -112,6 +121,11 @@ func refresh() -> void:
 	var selected_object = _item_object(get_selected())
 	var collapsed: Dictionary = {}
 	_capture_collapsed(get_root(), collapsed)
+	if _state_pending:
+		collapsed = _pending_state.get("collapsed", {})
+		selected_object = instance_from_id(_pending_state.get("selected", 0))
+		_state_pending = false
+		_pending_state = {}
 	_rebuilding = true
 	_disconnect_watched()
 	clear()
@@ -124,6 +138,31 @@ func refresh() -> void:
 	_rebuilding = false
 	if had_selection and get_selected() == null:
 		object_selected.emit(null)
+
+
+## Reveals and selects [param object]'s row, emitting [signal object_selected] like a click.
+func select_object(object: Object) -> bool:
+	var item: TreeItem = tree_items.get(object)
+	if item == null:
+		return false
+	var parent = item.get_parent()
+	while parent != null:
+		parent.collapsed = false
+		parent = parent.get_parent()
+	set_selected(item, 0)
+	scroll_to_item(item)
+	queue_redraw()
+	return true
+
+
+## Collapse and selection keyed by instance id, for handing back to [method set_root_node].
+func get_tree_state() -> Dictionary:
+	if _state_pending:
+		return _pending_state
+	var collapsed: Dictionary = {}
+	_capture_collapsed(get_root(), collapsed)
+	var selected = _item_object(get_selected())
+	return {"collapsed": collapsed, "selected": selected.get_instance_id() if selected != null else 0}
 
 
 func _capture_collapsed(item: TreeItem, collapsed: Dictionary) -> void:
@@ -189,7 +228,11 @@ func _read_node(node: Node, parent: TreeItem, collapsed: Dictionary, selected_ob
 	if show_scripts:
 		var script = node.get_script() as Script
 		if script != null and not script.resource_path.is_empty():
-			_add_button(item, &"Script", SCRIPT_BUTTON, "Open attached script:\n%s" % script.resource_path)
+			var script_scene = _embedded_scene(script.resource_path)
+			if script_scene.is_empty():
+				_add_button(item, &"Script", SCRIPT_BUTTON, "Open attached script:\n%s" % script.resource_path)
+			elif _is_edited_scene(script_scene):
+				_add_button(item, &"Script", SCRIPT_BUTTON, "Open built-in script of:\n%s" % script_scene)
 	if node is Node3D or node is CanvasItem:
 		_add_button(item, &"GuiVisibilityVisible" if node.visible else &"GuiVisibilityHidden", VISIBILITY_BUTTON, "Toggle visibility")
 	if show_resources and node is MeshInstance3D and node.mesh != null:
@@ -213,16 +256,40 @@ func _add_resource(parent: TreeItem, resource: Resource, collapsed: Dictionary, 
 
 
 func _set_item(item: TreeItem, object: Object, label: String, path: String) -> void:
+	var embedded_in = _embedded_scene(path)
 	item.set_text(0, label)
-	item.set_metadata(0, {"object": object, "path": path})
-	item.set_tooltip_text(0, "%s\nClass: %s" % [label, object.get_class()])
+	item.set_metadata(0, {"object": object, "path": path if embedded_in.is_empty() else "", "embedded_in": embedded_in})
+	var tooltip = "%s\nClass: %s" % [label, object.get_class()]
+	if not embedded_in.is_empty():
+		tooltip += "\nEmbedded in: %s" % embedded_in
+	item.set_tooltip_text(0, tooltip)
 	if not Engine.is_editor_hint():
 		return
 	var editor_theme = EditorInterface.get_editor_theme()
 	var icon_name = object.get_class()
 	item.set_icon(0, editor_theme.get_icon(icon_name if editor_theme.has_icon(icon_name, &"EditorIcons") else "Node", &"EditorIcons"))
-	if not path.is_empty() and ResourceLoader.exists(path):
+	if not embedded_in.is_empty():
+		if _is_edited_scene(embedded_in):
+			_add_button(item, &"Edit", EDIT_BUTTON, "Edit embedded resource")
+	elif not path.is_empty() and ResourceLoader.exists(path):
 		_add_button(item, &"Load", PATH_BUTTON, "Open resource:\n%s" % path)
+
+
+# ResourceLoader.exists passes for cached "::" sub-resource paths, so they need their own check.
+func _embedded_scene(path: String) -> String:
+	return path.get_slice("::", 0) if path.contains("::") else ""
+
+
+func _is_edited_scene(scene_path: String) -> bool:
+	if scene_path.is_empty() or not Engine.is_editor_hint():
+		return false
+	var edited = EditorInterface.get_edited_scene_root()
+	return edited != null and edited.scene_file_path == scene_path
+
+
+func _edit_embedded(object: Object, scene_path: String) -> void:
+	if object is Resource and _is_edited_scene(scene_path):
+		EditorInterface.edit_resource(object)
 
 
 func _add_button(item: TreeItem, icon_name: StringName, id: int, tooltip: String) -> void:
@@ -258,10 +325,15 @@ func _on_item_mouse_selected(mouse_position: Vector2, mouse_button_index: int) -
 
 func _on_item_activated() -> void:
 	var item = get_selected()
-	if _item_object(item) != null:
-		var path: String = item.get_metadata(0).get("path", "")
-		if not path.is_empty() and ResourceLoader.exists(path):
-			path_activated.emit(path)
+	var object = _item_object(item)
+	if object == null:
+		return
+	var metadata: Dictionary = item.get_metadata(0)
+	var path: String = metadata.get("path", "")
+	if not path.is_empty() and ResourceLoader.exists(path):
+		path_activated.emit(path)
+	else:
+		_edit_embedded(object, metadata.get("embedded_in", ""))
 
 
 func _on_button_clicked(item: TreeItem, _column: int, id: int, mouse_button_index: int) -> void:
@@ -270,10 +342,17 @@ func _on_button_clicked(item: TreeItem, _column: int, id: int, mouse_button_inde
 		return
 	if id == PATH_BUTTON:
 		path_activated.emit(item.get_metadata(0).get("path", ""))
+	elif id == EDIT_BUTTON:
+		_edit_embedded(object, item.get_metadata(0).get("embedded_in", ""))
 	elif id == SCRIPT_BUTTON and object is Node:
 		var script = object.get_script() as Script
-		if script != null:
+		if script == null:
+			return
+		var script_scene = _embedded_scene(script.resource_path)
+		if script_scene.is_empty():
 			path_activated.emit(script.resource_path)
+		elif _is_edited_scene(script_scene):
+			EditorInterface.edit_script(script)
 	elif id == VISIBILITY_BUTTON and (object is Node3D or object is CanvasItem):
 		object.visible = not object.visible
 		_queue_refresh()
